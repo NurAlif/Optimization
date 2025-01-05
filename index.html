@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebRTC Client</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+    <style>
+        body::-webkit-scrollbar {
+  display: none;
+}
+        </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand navbar-dark bg-dark" aria-label="Second navbar example">
+        <div class="container-fluid">
+          <a class="navbar-brand" href="#">Multi Objective Optimizaton Simulation</a>
+        </div>
+      </nav>
+    <div>
+        <div class="container text-center">
+            <button id="bt_toggle_sim" type="button" class="btn btn-secondary" onclick="toggle_sim()">simulation is On</button>
+            <div class="row align-items-start">
+              <div class="col">
+                <div id="compressor_output" style="width:600px;height:250px;"></div>
+                <div id="consumtion" style="width:600px;height:250px;"></div>
+                <div id="Ptank1" style="width:600px;height:250px;"></div>
+                <div id="Ptank2" style="width:600px;height:250px;"></div>
+              </div>
+            </div>
+          </div>
+        
+        
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    <script>
+        var DATA = [];
+
+        var P_in = 0;
+        var P_out = 0;
+
+        var X_valve = 0;
+        var X_comp = 0;
+
+        var P1_err = 0;
+        var P1_tar = 16;
+        var P2_err = 0;
+        var P2_tar = 12;
+
+        var P1 = 0;
+        var P2 = 0;
+
+        var XR_valve = 5;
+        var XR_comp = 5;
+        var X_valve_step = 0.05;
+
+        // descision var
+        var XR_valve = 5;
+        var XR_comp = 5;
+        var X_valve_step = 0.05;
+
+        var minRvalve = 0;
+        var minRcomp = 0;
+        var minRVstep = 0;
+
+        var maxRvalve = 40;
+        var maxRcomp = 40;
+        var maxRVstep = 2;
+
+        var genValve = [];
+        var genComp = [];
+        var genVstep = [];
+
+        for(let i = 1; i<=20; i++){
+            genValve.push(i/20* maxRvalve);
+            genComp.push(i/20* maxRcomp);
+            genVstep.push(i/20* maxRVstep);
+        }
+
+
+        var samples = 20;
+        var samplesT = 8000;
+
+
+        var XT_valve = 2;
+        var XT_comp = 3;
+        var time = 0;
+        var timer_comp = 0;
+        var timer_valve = 0;
+
+        var error_sum_P1 = 0;
+        var max_error_amp_P1 = 0;
+        var error_sum_P2 = 0;
+        var max_error_amp_P2 = 0;
+
+        var changes_count_valve = 0;
+        var changes_count_comp = 0;
+
+        var simOn = true;
+
+        function toggle_sim(){
+            simOn = !simOn;
+            if (simOn){document.getElementById("bt_toggle_sim").innerHTML = "Simulation is On";}
+            else      {document.getElementById("bt_toggle_sim").innerHTML = "Simulation is Off";}
+        }
+
+        var System = {
+            frequency : 30, // /1000
+            startTime : 0.0,
+            output : 0,
+            P_1 : 0,
+            P_2 : 0,
+            P_1_err : 0,
+            P_2_err : 0,
+            P_1_tar : 12,
+            P_2_tar : 12,
+            XT_valve : 2,
+            XT_vent : 2,
+            XT_comp : 3,
+
+            graphData : [{
+                x: [0,0],
+                y: [0,0],
+                mode: 'line'
+            }],
+            graphData2 : [{
+                x: [0,0],
+                y: [0,0],
+                mode: 'line'
+            }],
+            layout : {
+                title: {text: 'Tank 1 Preasure'}
+            },
+            layout2 : {
+                title: {text: 'Tank 2 Preasure'}
+            },
+            start: function(){ 
+                this.startTime = time;
+                this.graphData = [{
+                    x: [0,0],
+                    y: [0,0],
+                    mode: 'line'
+                }];
+                this.graphData2 = [{
+                    x: [0,0],
+                    y: [0,0],
+                    mode: 'line'
+                }];
+                Plotly.newPlot('Ptank1', this.graphData, this.layout);
+                Plotly.newPlot('Ptank2', this.graphData2, this.layout2);
+            },
+            loop: function() {
+                if(simOn){
+
+                    P1 += Compressor.output;
+                    let deltaP = (P1>P2)?(X_valve*(P1-P2)*0.1):0;
+            
+                    P1 -= deltaP;
+                    P2 += deltaP;
+                    P2 -= Consumtion.total;
+                    P1_err = P1 - P1_tar
+                    P2_err = P2 - P2_tar
+
+                    if(P1_err > max_error_amp_P1) max_error_amp_P1 = P1_err;
+                    if(P2_err > max_error_amp_P2) max_error_amp_P2 = P2_err;
+                    error_sum_P1 += P1_err;
+                    error_sum_P2 += P2_err;
+                    error_sum_P1 = Math.min(error_sum_P1, 6000000);
+                    error_sum_P2 = Math.min(error_sum_P2, 6000000);
+                    max_error_amp_P1 = Math.min(max_error_amp_P1, 6000000);
+                    max_error_amp_P2 = Math.min(max_error_amp_P2, 6000000);
+
+                    timer_comp++;
+
+                    if(P1_err < -3 && timer_comp >= XR_comp) {
+                        Compressor.setOnOff(true);
+                        timer_comp = 0;
+                    }
+                    else if(P1_err > 3 && timer_comp >= XR_comp){
+                        Compressor.setOnOff(false);  
+                        timer_comp = 0;
+                    }
+
+
+                    timer_valve+=1;
+                    if(P2_err < -3 && timer_valve) {
+                        X_valve += X_valve_step;
+                        timer_valve = 0;
+                        changes_count_valve++;
+                    }
+                    else if(P2_err > 3 && timer_valve) {
+                        changes_count_valve++;
+                        X_valve -= X_valve_step;
+                        timer_valve = 0;
+                    }
+
+                    // console.log(this.frequency);
+
+                    this.graphData[0].x.push(time);
+                    this.graphData[0].y.push(P1);
+                    Plotly.redraw('Ptank1', this.graphData, this.layout);
+                    
+                    this.graphData2[0].x.push(time);
+                    this.graphData2[0].y.push(P2);
+                    Plotly.redraw('Ptank2', this.graphData2, this.layout2);
+                }
+            },
+        };
+
+
+        var Compressor = {
+            on : false,
+            amplitude : 6,
+            frequency : 10, // /1000
+            time : 0.0,
+            startTime : 0.0,
+            output : 0,
+            graphData : [{
+                x: [0,0],
+                y: [0,0],
+                mode: 'line'
+            }],
+            layout : {
+                title: {text: 'Compressor output'}
+            },
+            setOnOff: function(on){
+                changes_count_comp+=1;
+                if(on){
+                    this.on = true;
+                }else{
+                    this.on = false;
+                    this.output = 0;
+                }
+
+            },
+            start: function(){ 
+                this.startTime = time;
+                this.graphData = [{
+                    x: [0,0],
+                    y: [0,0],
+                    mode: 'line'
+                }];
+                Plotly.newPlot('compressor_output', this.graphData, this.layout);
+            },
+            loop: function() {
+                if(simOn){
+                    // console.log(this.frequency);
+                    if(this.on)
+                        this.output = Math.max(Math.sin(time/this.frequency) * this.amplitude, 1);
+                    this.output = Math.min(this.output, 6000000);
+                    this.graphData[0].x.push(time);
+                    this.graphData[0].y.push(this.output);
+                    Plotly.redraw('compressor_output', this.graphData, this.layout);
+                }
+            },
+        };
+
+
+
+        var Consumtion = {
+            amplitude : 0.4,
+            amplitude2 : 0.6,
+            interval : 50, // /1000
+            interval2 : 300, // /1000
+            time : 0.0,
+            startTime : 0.0,
+            total : 0,
+            graphData : [{
+                x: [0,0],
+                y: [0,0],
+                mode: 'line'
+            }],
+            layout : {
+                title: {text: 'consumtion'}
+            },
+            start: function(){ 
+                this.startTime = time;
+                this.graphData = [{
+                    x: [0,0],
+                    y: [0,0],
+                    mode: 'line'
+                }];
+                Plotly.newPlot('consumtion', this.graphData, this.layout);
+            },
+            loop: function() {
+                if(simOn){
+                    // console.log(this.frequency);
+                    this.total = ((Math.sin(time/this.interval)+1) * this.amplitude) + (Math.random()*0.9);
+                    // this.total += Math.max(((Math.sin(time/this.frequency+0.3)+1) * this.amplitude) + (Math.random()*0.1), 0.2);
+                    this.total += ((Math.cos(time/this.interval2)+1) * this.amplitude2);
+                    this.total += ((Math.cos(time/this.interval2*0.6)+0.4) * this.amplitude2);
+                    this.total = Math.max(this.total, 0.1);
+                    this.total = Math.min(this.total, 6000000);
+                    this.graphData[0].x.push(time);
+                    this.graphData[0].y.push(this.total);
+                    Plotly.redraw('consumtion', this.graphData, this.layout);
+                }
+            },
+        }
+
+
+        function Main(){
+            Compressor.output
+        }
+
+
+
+        function Loop(){
+            Compressor.loop();
+            Consumtion.loop();
+            System.loop();
+            time+=10;
+            if(time>samplesT) Restart();
+        }
+
+        // setInterval(func, 10, "AAAA");
+        Compressor.start();
+        Consumtion.start();
+        System.start();
+        var mainLoop = setInterval(Loop, 0);
+        // setInterval(Consumtion.loop.bind(Consumtion), 10);
+
+        // setInterval(Main, 10);
+
+        function RecordEval(){
+            // XR_valve 
+            // XR_comp
+            // X_valve_step
+
+            // error_sum_P1
+            // max_error_amp_P1
+            // error_sum_P2
+            // max_error_amp_P2
+            // changes_count_valve
+            // changes_count_comp
+            let eval = [XR_valve, XR_comp, X_valve_step,
+            error_sum_P1,
+            max_error_amp_P1,
+            error_sum_P2,
+            max_error_amp_P2,
+            changes_count_valve,
+            changes_count_comp
+            ];
+
+            DATA.push(eval);
+            console.log(eval);
+        }
+
+        var idx_major = 0;
+        var idx_minor = 0;
+        var sample_counter = 0;
+        var max_sample = 1000;
+
+        let currentCase = [1,1];
+        var currentCaseVstep = 0.1;
+        var CaseVstep = 0.1;
+
+        function getRandomInt(max) {
+            return Math.floor(Math.random() * max) + 1;
+        }
+
+        function nextIter(){
+            idx_major++;
+            currentCaseVstep = CaseVstep*idx_major;
+            if(idx_major >= 5){
+                console.log(sample_counter);
+                idx_major = 0;
+                sample_counter++;
+                currentCase = [getRandomInt(40), getRandomInt(40)];
+                if(sample_counter >= max_sample){
+                    sample_counter = 0;
+                    return 1;
+                }
+            }
+            return 0;
+        }
+
+        // console.log(testCasesVar);
+
+        function Restart(){
+            // clearInterval(mainLoop);
+
+            
+            if (nextIter() === 1){
+                console.log("FINISHED");
+                console.log(JSON.stringify(DATA));
+                return;
+            } 
+
+            console.log(currentCase);
+
+            RecordEval();
+
+            P_in = 0;
+            P_out = 0;
+            X_valve = 0;
+            X_comp = 0;
+            P1_err = 0;
+            P1_tar = 16;
+            P2_err = 0;
+            P2_tar = 12;
+            P1 = 0;
+            P2 = 0;
+            XR_valve = currentCase[0];
+            XR_comp = currentCase[1];
+            X_valve_step = currentCaseVstep;
+            XT_valve = 2;
+            XT_comp = 3;
+            time = 0;
+            timer_comp = 0;
+            timer_valve = 0;
+            error_sum_P1 = 0;
+            max_error_amp_P1 = 0;
+            error_sum_P2 = 0;
+            max_error_amp_P2 = 0;
+            changes_count_valve = 0;
+            changes_count_comp = 0;
+
+
+
+            Compressor.start();
+            Consumtion.start();
+            System.start();
+            // mainLoop = setInterval(Loop, 10);
+        }
+
+    </script>
+
+</body>
+</html>
